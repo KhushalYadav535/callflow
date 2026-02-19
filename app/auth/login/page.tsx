@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Phone, ArrowRight, Mail, Lock } from 'lucide-react'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL
+
 export default function LoginPage() {
   const router = useRouter()
 
@@ -19,22 +21,42 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      // Mock authentication - in production, call your API
-      if (email && password) {
-        // Simulate API call
-        await new Promise((resolve) => setTimeout(resolve, 500))
-
-        // Store in localStorage temporarily (replace with proper auth later)
-        localStorage.setItem('userEmail', email)
-        localStorage.setItem('tenantId', 'acme-corp')
-
-        // Redirect to dashboard
-        router.push('/app/acme-corp/dashboard')
-      } else {
-        setError('Please enter both email and password')
+      if (!email || !password) {
+        throw new Error('Please enter both email and password')
       }
+
+      if (!API_URL) {
+        throw new Error('API URL is not configured.')
+      }
+
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Authentication failed. Please try again.')
+      }
+
+      const token: string | undefined = data.token
+      const company = data.company
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('token', token || '')
+        localStorage.setItem('userEmail', company?.email ?? email)
+        localStorage.setItem('tenantId', company?.id ?? company?._id ?? 'default-tenant')
+      }
+
+      const tenantId = company?.id ?? company?._id ?? 'default-tenant'
+      router.push(`/app/${tenantId}/dashboard`)
     } catch (err) {
-      setError('Authentication failed. Please try again.')
+      const message = err instanceof Error ? err.message : 'Authentication failed. Please try again.'
+      setError(message)
     } finally {
       setLoading(false)
     }

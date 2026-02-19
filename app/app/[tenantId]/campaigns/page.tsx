@@ -1,10 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useParams } from 'next/navigation'
 import { Plus, Search, Filter, MoreVertical, Play, Pause, Trash2 } from 'lucide-react'
 
-interface Campaign {
+type BackendCampaign = {
+  _id: string
+  name: string
+  type: 'RECOVERY' | 'REMINDER' | 'SALES'
+  status: 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED'
+  totalContacts: number
+  createdAt: string
+}
+
+type UICampaign = {
   id: string
   name: string
   type: 'recovery' | 'reminder' | 'sales'
@@ -15,64 +25,6 @@ interface Campaign {
   successRate: number
   created: string
 }
-
-const mockCampaigns: Campaign[] = [
-  {
-    id: '1',
-    name: 'Q1 Recovery Campaign',
-    type: 'recovery',
-    contacts: 5000,
-    called: 3250,
-    pending: 1750,
-    status: 'running',
-    successRate: 87,
-    created: '2026-02-10',
-  },
-  {
-    id: '2',
-    name: 'Monthly Reminder Drive',
-    type: 'reminder',
-    contacts: 2500,
-    called: 2500,
-    pending: 0,
-    status: 'completed',
-    successRate: 92,
-    created: '2026-02-01',
-  },
-  {
-    id: '3',
-    name: 'Product Launch Outreach',
-    type: 'sales',
-    contacts: 3000,
-    called: 1350,
-    pending: 1650,
-    status: 'running',
-    successRate: 78,
-    created: '2026-02-05',
-  },
-  {
-    id: '4',
-    name: 'Customer Retention Wave',
-    type: 'recovery',
-    contacts: 1800,
-    called: 180,
-    pending: 1620,
-    status: 'scheduled',
-    successRate: 0,
-    created: '2026-02-18',
-  },
-  {
-    id: '5',
-    name: 'Q4 Sales Sprint',
-    type: 'sales',
-    contacts: 4200,
-    called: 4200,
-    pending: 0,
-    status: 'completed',
-    successRate: 84,
-    created: '2026-01-15',
-  },
-]
 
 const typeColors: Record<string, string> = {
   recovery: 'bg-blue-500/10 text-blue-500',
@@ -88,12 +40,119 @@ const statusColors: Record<string, string> = {
   paused: 'bg-orange-500/10 text-orange-500',
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL
+
 export default function CampaignsPage() {
+  const params = useParams<{ tenantId: string }>()
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [campaigns, setCampaigns] = useState<UICampaign[]>([])
+  const [loading, setLoading] = useState(false)
+  const [actioning, setActioning] = useState<string | null>(null)
 
-  const filteredCampaigns = mockCampaigns.filter((campaign) => {
+  const loadCampaigns = async () => {
+    if (!API_URL) return
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    if (!token) return
+    try {
+      setLoading(true)
+      const res = await fetch(`${API_URL}/api/campaigns`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const backendCampaigns: BackendCampaign[] = data.campaigns || []
+      const mapped: UICampaign[] = backendCampaigns.map((c) => ({
+        id: c._id,
+        name: c.name,
+        type: c.type === 'RECOVERY' ? 'recovery' : c.type === 'REMINDER' ? 'reminder' : 'sales',
+        contacts: c.totalContacts ?? 0,
+        called: 0,
+        pending: c.totalContacts ?? 0,
+        status:
+          c.status === 'ACTIVE' ? 'running' : c.status === 'PAUSED' ? 'paused' : c.status === 'COMPLETED' ? 'completed' : 'draft',
+        successRate: 0,
+        created: c.createdAt,
+      }))
+      setCampaigns(mapped)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadCampaigns()
+  }, [])
+
+  const handlePause = async (campaignId: string) => {
+    if (!API_URL || actioning) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setActioning(campaignId)
+    try {
+      const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/pause`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Failed to pause')
+      await loadCampaigns()
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(e)
+      alert(e instanceof Error ? e.message : 'Failed to pause campaign')
+    } finally {
+      setActioning(null)
+    }
+  }
+
+  const handleResume = async (campaignId: string) => {
+    if (!API_URL || actioning) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setActioning(campaignId)
+    try {
+      const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/launch`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Failed to resume')
+      await loadCampaigns()
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(e)
+      alert(e instanceof Error ? e.message : 'Failed to resume campaign')
+    } finally {
+      setActioning(null)
+    }
+  }
+
+  const handleDelete = async (campaignId: string) => {
+    if (!window.confirm('Are you sure you want to delete this campaign and all its contacts?')) return
+    if (!API_URL || actioning) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setActioning(campaignId)
+    try {
+      const res = await fetch(`${API_URL}/api/campaigns/${campaignId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Failed to delete')
+      await loadCampaigns()
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(e)
+      alert(e instanceof Error ? e.message : 'Failed to delete campaign')
+    } finally {
+      setActioning(null)
+    }
+  }
+
+  const filteredCampaigns = campaigns.filter((campaign) => {
     const matchesSearch = campaign.name.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesType = filterType === 'all' || campaign.type === filterType
     const matchesStatus = filterStatus === 'all' || campaign.status === filterStatus
@@ -110,7 +169,7 @@ export default function CampaignsPage() {
           <p className="text-muted-foreground">Manage and monitor all your calling campaigns</p>
         </div>
         <Link
-          href="/app/acme-corp/campaigns/new"
+          href={`/app/${params.tenantId}/campaigns/new`}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-semibold"
         >
           <Plus size={18} />
@@ -197,11 +256,20 @@ export default function CampaignsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredCampaigns.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                    Loading campaigns...
+                  </td>
+                </tr>
+              ) : filteredCampaigns.length > 0 ? (
                 filteredCampaigns.map((campaign, index) => (
                   <tr key={campaign.id} className="border-b border-border hover:bg-muted/50 transition-colors" style={{ animationDelay: `${index * 50}ms` }}>
                     <td className="py-4 px-6 text-sm font-medium text-foreground">
-                      <Link href={`/app/acme-corp/campaigns/${campaign.id}`} className="hover:text-primary transition-colors">
+                      <Link
+                        href={`/app/${params.tenantId}/campaigns/${campaign.id}`}
+                        className="hover:text-primary transition-colors"
+                      >
                         {campaign.name}
                       </Link>
                     </td>
@@ -230,18 +298,29 @@ export default function CampaignsPage() {
                     <td className="py-4 px-6 text-sm">
                       <div className="flex items-center gap-2">
                         {campaign.status === 'running' && (
-                          <button className="p-1.5 hover:bg-muted rounded-lg transition-colors" title="Pause campaign">
+                          <button
+                            onClick={() => handlePause(campaign.id)}
+                            disabled={actioning === campaign.id}
+                            className="p-1.5 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                            title="Pause campaign"
+                          >
                             <Pause size={16} className="text-foreground" />
                           </button>
                         )}
                         {campaign.status === 'paused' && (
-                          <button className="p-1.5 hover:bg-muted rounded-lg transition-colors" title="Resume campaign">
+                          <button
+                            onClick={() => handleResume(campaign.id)}
+                            disabled={actioning === campaign.id}
+                            className="p-1.5 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                            title="Resume campaign"
+                          >
                             <Play size={16} className="text-foreground" />
                           </button>
                         )}
                         <button
-                          onClick={() => console.log('Delete campaign:', campaign.id)}
-                          className="p-1.5 hover:bg-destructive/10 rounded-lg transition-colors"
+                          onClick={() => handleDelete(campaign.id)}
+                          disabled={actioning === campaign.id}
+                          className="p-1.5 hover:bg-destructive/10 rounded-lg transition-colors disabled:opacity-50"
                           title="Delete campaign"
                         >
                           <Trash2 size={16} className="text-destructive" />

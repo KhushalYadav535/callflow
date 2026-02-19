@@ -1,11 +1,27 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronRight, Upload, Phone, Clock, Settings } from 'lucide-react'
+import { useParams, useRouter } from 'next/navigation'
+import { ChevronRight, Upload, Phone } from 'lucide-react'
 
-type Step = 'info' | 'upload' | 'config' | 'review'
+type Step = 'info' | 'upload' | 'review'
+
+type Contact = {
+  name: string
+  phone: string
+  amount: number
+  dueDate: string
+  loanType: string
+  email: string
+  city: string
+}
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL
 
 export default function NewCampaignPage() {
+  const params = useParams<{ tenantId: string }>()
+  const router = useRouter()
+
   const [currentStep, setCurrentStep] = useState<Step>('info')
   const [formData, setFormData] = useState({
     name: '',
@@ -18,11 +34,16 @@ export default function NewCampaignPage() {
     retryDelay: 24,
     totalContacts: 0,
   })
+  const [uploadedFileName, setUploadedFileName] = useState('')
+  const [uploadError, setUploadError] = useState('')
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [campaignId, setCampaignId] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [isLaunching, setIsLaunching] = useState(false)
 
   const steps: { id: Step; label: string; icon: React.ReactNode }[] = [
     { id: 'info', label: 'Campaign Info', icon: <Phone size={20} /> },
     { id: 'upload', label: 'Upload Contacts', icon: <Upload size={20} /> },
-    { id: 'config', label: 'Configure AI', icon: <Settings size={20} /> },
     { id: 'review', label: 'Review & Launch', icon: <ChevronRight size={20} /> },
   ]
 
@@ -37,6 +58,133 @@ export default function NewCampaignPage() {
     const stepIndex = steps.findIndex((s) => s.id === currentStep)
     if (stepIndex > 0) {
       setCurrentStep(steps[stepIndex - 1].id)
+    }
+  }
+
+  const handleFileChange = async (e: any) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!API_URL) {
+      setUploadError('API URL is not configured.')
+      return
+    }
+
+    if (!formData.name || !formData.type) {
+      setUploadError('Please fill campaign info first.')
+      setCurrentStep('info')
+      return
+    }
+
+    const lowerName = file.name.toLowerCase()
+    const isCsv = lowerName.endsWith('.csv')
+    const isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')
+
+    if (!isCsv && !isExcel) {
+      setUploadError('Please upload a CSV or Excel file.')
+      return
+    }
+
+    setUploadError('')
+    setUploadedFileName(file.name)
+    setIsUploading(true)
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      if (!token) {
+        setUploadError('You must be logged in to upload contacts.')
+        return
+      }
+
+      const body = new FormData()
+      body.append('file', file)
+      body.append('name', formData.name)
+      body.append('type', formData.type.toUpperCase())
+      body.append('voice', formData.voice)
+      body.append('language', formData.language)
+      body.append('maxRetries', String(formData.maxRetries))
+      body.append('retryAfterHours', String(formData.retryDelay))
+
+      const res = await fetch(`${API_URL}/api/campaigns/create`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body,
+      })
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}))
+        throw new Error(error.message || 'Failed to create campaign from file.')
+      }
+
+      const data = await res.json()
+
+      setCampaignId(data.campaign._id)
+      setFormData((prev) => ({
+        ...prev,
+        totalContacts: data.totalCount ?? data.campaign.totalContacts ?? prev.totalContacts,
+      }))
+
+      const previewContacts: Contact[] = (data.contacts || []).map((c: any) => ({
+        name: c.name,
+        phone: c.phone,
+        amount: c.amount,
+        dueDate: c.dueDate ? new Date(c.dueDate).toISOString().slice(0, 10) : '',
+        loanType: c.loanType,
+        email: c.email,
+        city: c.city,
+      }))
+
+      setContacts(previewContacts)
+      setCurrentStep('review')
+    } catch (err: any) {
+      setUploadError(err.message || 'Unable to upload file. Please try again.')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleLaunch = async () => {
+    if (!campaignId) {
+      setUploadError('Please upload contacts and create a campaign first.')
+      setCurrentStep('upload')
+      return
+    }
+
+    if (!API_URL) {
+      setUploadError('API URL is not configured.')
+      return
+    }
+
+    try {
+      setIsLaunching(true)
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      if (!token) {
+        setUploadError('You must be logged in to launch a campaign.')
+        return
+      }
+
+      const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/launch`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}))
+        throw new Error(error.message || 'Failed to launch campaign.')
+      }
+
+      const tenantId = params?.tenantId
+      if (tenantId) {
+        router.push(`/app/${tenantId}/campaigns/${campaignId}`)
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to launch campaign.')
+    } finally {
+      setIsLaunching(false)
     }
   }
 
@@ -150,96 +298,74 @@ export default function NewCampaignPage() {
                 accept=".csv,.xlsx"
                 className="hidden"
                 id="file-upload"
+                onChange={handleFileChange}
               />
-              <label htmlFor="file-upload" className="inline-block px-6 py-2 rounded-lg border border-primary text-primary hover:bg-primary/10 transition-colors cursor-pointer font-semibold">
+              <label
+                htmlFor="file-upload"
+                className="inline-block px-6 py-2 rounded-lg border border-primary text-primary hover:bg-primary/10 transition-colors cursor-pointer font-semibold"
+              >
                 Select File
               </label>
               <p className="text-xs text-muted-foreground mt-4">Supports CSV and Excel files</p>
+              {uploadedFileName && (
+                <p className="text-sm text-foreground mt-2">
+                  Selected file: <span className="font-semibold">{uploadedFileName}</span>
+                  {formData.totalContacts > 0 && ` • Contacts detected: ${formData.totalContacts}`}
+                </p>
+              )}
+              {uploadError && (
+                <p className="text-sm text-red-600 mt-2">
+                  {uploadError}
+                </p>
+              )}
             </div>
 
-            <div className="p-4 rounded-lg bg-muted/50">
+            <div className="p-4 rounded-lg bg-muted/50 space-y-3">
               <p className="text-sm text-muted-foreground">
-                <strong>Format required:</strong> First Name, Last Name, Phone Number
+                <strong>Required columns in CSV:</strong> name, phone, amount, dueDate, loanType, email, city
               </p>
+              {contacts.length > 0 && (
+                <div className="max-h-64 overflow-auto border border-border rounded-md bg-background">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="bg-muted">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Name</th>
+                        <th className="px-3 py-2 font-semibold">Phone</th>
+                        <th className="px-3 py-2 font-semibold">Amount</th>
+                        <th className="px-3 py-2 font-semibold">Due Date</th>
+                        <th className="px-3 py-2 font-semibold">Loan Type</th>
+                        <th className="px-3 py-2 font-semibold">Email</th>
+                        <th className="px-3 py-2 font-semibold">City</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contacts.slice(0, 20).map((c, idx) => (
+                        <tr key={idx} className="border-t border-border">
+                          <td className="px-3 py-1.5">{c.name}</td>
+                          <td className="px-3 py-1.5">{c.phone}</td>
+                          <td className="px-3 py-1.5">{c.amount}</td>
+                          <td className="px-3 py-1.5">{c.dueDate}</td>
+                          <td className="px-3 py-1.5">{c.loanType}</td>
+                          <td className="px-3 py-1.5">{c.email}</td>
+                          <td className="px-3 py-1.5">{c.city}</td>
+                        </tr>
+                      ))}
+                      {contacts.length > 20 && (
+                        <tr>
+                          <td className="px-3 py-2 text-muted-foreground" colSpan={7}>
+                            Showing first 20 contacts out of {contacts.length}.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Step 3: Configure AI */}
-        {currentStep === 'config' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-foreground mb-6">Configure AI Agent</h2>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Voice *</label>
-                <select
-                  value={formData.voice}
-                  onChange={(e) => setFormData({ ...formData, voice: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  <option value="sarah-us">Sarah (US English)</option>
-                  <option value="john-us">John (US English)</option>
-                  <option value="emma-uk">Emma (UK English)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Language *</label>
-                <select
-                  value={formData.language}
-                  onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  <option value="en-US">English (US)</option>
-                  <option value="en-GB">English (UK)</option>
-                  <option value="es-ES">Spanish (Spain)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Call Timing *</label>
-                <select
-                  value={formData.timing}
-                  onChange={(e) => setFormData({ ...formData, timing: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  <option value="business-hours">Business Hours (9 AM - 5 PM)</option>
-                  <option value="anytime">Anytime</option>
-                  <option value="evenings">Evenings Only (5 PM - 9 PM)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Max Retries *</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={formData.maxRetries}
-                  onChange={(e) => setFormData({ ...formData, maxRetries: parseInt(e.target.value) })}
-                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Retry Delay (Hours) *</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="168"
-                  value={formData.retryDelay}
-                  onChange={(e) => setFormData({ ...formData, retryDelay: parseInt(e.target.value) })}
-                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Review & Launch */}
+        {/* Step 3: Review & Launch */}
         {currentStep === 'review' && (
           <div className="space-y-6">
             <div>
@@ -293,15 +419,20 @@ export default function NewCampaignPage() {
         {currentStep !== 'review' ? (
           <button
             onClick={handleNext}
-            className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-semibold flex items-center gap-2"
+            disabled={currentStep === 'upload' && (isUploading || !campaignId)}
+            className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold flex items-center gap-2"
           >
             Next
             <ChevronRight size={18} />
           </button>
         ) : (
-          <button className="px-6 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-semibold flex items-center gap-2">
+          <button
+            onClick={handleLaunch}
+            disabled={isLaunching || !campaignId}
+            className="px-6 py-2.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold flex items-center gap-2"
+          >
             <Phone size={18} />
-            Launch Campaign
+            {isLaunching ? 'Launching...' : 'Launch Campaign'}
           </button>
         )}
       </div>

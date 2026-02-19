@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Phone, ArrowRight, Mail, Lock, Building2 } from 'lucide-react'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL
+
 export default function RegisterPage() {
   const router = useRouter()
 
@@ -45,41 +47,42 @@ export default function RegisterPage() {
     setLoading(true)
 
     try {
-      // Mock API call - replace with real backend integration
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-
-      // Mock successful registration - generate tenant ID
-      const tenantId = 'tenant-' + Date.now()
-
-      // Store in localStorage temporarily (replace with proper auth later)
-      localStorage.setItem('tenantId', tenantId)
-      localStorage.setItem('userEmail', formData.email)
-
-      // Redirect to dashboard
-      router.push(`/app/${tenantId}/dashboard`)
-    } catch (err) {
-      setError((err as Error).message || 'Registration failed')
-    } finally {
-      setLoading(false)
-    }
-
-      const mockToken = 'mock-jwt-token-' + Date.now()
-
-      const mockTenant = {
-        id: tenantId,
-        name: formData.company,
-        plan: 'starter' as const,
-        createdAt: new Date().toISOString(),
+      if (!API_URL) {
+        throw new Error('API URL is not configured.')
       }
 
-      setToken(mockToken)
-      setUser(mockUser)
-      setCurrentTenant(mockTenant)
+      const res = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.company,
+          email: formData.email,
+          password: formData.password,
+        }),
+      })
 
-      // Redirect to dashboard
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Registration failed. Please try again.')
+      }
+
+      const token: string | undefined = data.token
+      const company = data.company
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('token', token || '')
+        localStorage.setItem('userEmail', company?.email ?? formData.email)
+        localStorage.setItem('tenantId', company?.id ?? company?._id ?? 'default-tenant')
+      }
+
+      const tenantId = company?.id ?? company?._id ?? 'default-tenant'
       router.push(`/app/${tenantId}/dashboard`)
     } catch (err) {
-      setError('Registration failed. Please try again.')
+      const message = err instanceof Error ? err.message : 'Registration failed. Please try again.'
+      setError(message)
     } finally {
       setLoading(false)
     }
