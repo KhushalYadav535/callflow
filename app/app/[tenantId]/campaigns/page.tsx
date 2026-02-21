@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+
+const getUserRole = () =>
+  typeof window !== 'undefined' ? localStorage.getItem('userRole') || 'TENANT_ADMIN' : 'TENANT_ADMIN'
 import { Plus, Search, Filter, MoreVertical, Play, Pause, Trash2 } from 'lucide-react'
 
 type BackendCampaign = {
@@ -12,6 +15,7 @@ type BackendCampaign = {
   status: 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED'
   totalContacts: number
   createdAt: string
+  stats?: { called: number; pending: number; connected: number; successRate: number }
 }
 
 type UICampaign = {
@@ -44,12 +48,17 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL
 
 export default function CampaignsPage() {
   const params = useParams<{ tenantId: string }>()
+  const [userRole] = useState(getUserRole)
+  const canManageCampaigns = userRole === 'TENANT_ADMIN' || userRole === 'CAMPAIGN_MANAGER'
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [campaigns, setCampaigns] = useState<UICampaign[]>([])
   const [loading, setLoading] = useState(false)
   const [actioning, setActioning] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState<{ page: number; limit: number; total: number } | null>(null)
+  const ITEMS_PER_PAGE = 10
 
   const loadCampaigns = async () => {
     if (!API_URL) return
@@ -57,7 +66,11 @@ export default function CampaignsPage() {
     if (!token) return
     try {
       setLoading(true)
-      const res = await fetch(`${API_URL}/api/campaigns`, {
+      const params = new URLSearchParams({ page: String(page), limit: String(ITEMS_PER_PAGE) })
+      if (searchTerm) params.set('search', searchTerm)
+      if (filterType !== 'all') params.set('type', filterType)
+      if (filterStatus !== 'all') params.set('status', filterStatus)
+      const res = await fetch(`${API_URL}/api/campaigns?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) return
@@ -68,14 +81,15 @@ export default function CampaignsPage() {
         name: c.name,
         type: c.type === 'RECOVERY' ? 'recovery' : c.type === 'REMINDER' ? 'reminder' : 'sales',
         contacts: c.totalContacts ?? 0,
-        called: 0,
-        pending: c.totalContacts ?? 0,
+        called: c.stats?.called ?? 0,
+        pending: c.stats?.pending ?? c.totalContacts ?? 0,
         status:
           c.status === 'ACTIVE' ? 'running' : c.status === 'PAUSED' ? 'paused' : c.status === 'COMPLETED' ? 'completed' : 'draft',
-        successRate: 0,
+        successRate: c.stats?.successRate ?? 0,
         created: c.createdAt,
       }))
       setCampaigns(mapped)
+      setPagination(data.pagination || null)
     } finally {
       setLoading(false)
     }
@@ -83,7 +97,7 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     loadCampaigns()
-  }, [])
+  }, [page, searchTerm, filterType, filterStatus])
 
   const handlePause = async (campaignId: string) => {
     if (!API_URL || actioning) return
@@ -152,13 +166,11 @@ export default function CampaignsPage() {
     }
   }
 
-  const filteredCampaigns = campaigns.filter((campaign) => {
-    const matchesSearch = campaign.name.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesType = filterType === 'all' || campaign.type === filterType
-    const matchesStatus = filterStatus === 'all' || campaign.status === filterStatus
-
-    return matchesSearch && matchesType && matchesStatus
-  })
+  const totalFromApi = pagination?.total ?? campaigns.length
+  const totalPages = Math.max(1, Math.ceil(totalFromApi / ITEMS_PER_PAGE))
+  const paginatedCampaigns = campaigns
+  const startItem = (page - 1) * ITEMS_PER_PAGE + 1
+  const endItem = Math.min(page * ITEMS_PER_PAGE, totalFromApi)
 
   return (
     <div className="space-y-6 pb-8">
@@ -168,13 +180,15 @@ export default function CampaignsPage() {
           <h1 className="text-3xl font-bold text-foreground mb-2">Campaigns</h1>
           <p className="text-muted-foreground">Manage and monitor all your calling campaigns</p>
         </div>
-        <Link
-          href={`/app/${params.tenantId}/campaigns/new`}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-semibold"
-        >
-          <Plus size={18} />
-          New Campaign
-        </Link>
+        {canManageCampaigns && (
+          <Link
+            href={`/app/${params.tenantId}/campaigns/new`}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-semibold"
+          >
+            <Plus size={18} />
+            New Campaign
+          </Link>
+        )}
       </div>
 
       {/* Filters and Search */}
@@ -186,7 +200,10 @@ export default function CampaignsPage() {
             type="text"
             placeholder="Search campaigns..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value)
+              setPage(1)
+            }}
             className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition-all"
           />
         </div>
@@ -194,7 +211,10 @@ export default function CampaignsPage() {
         {/* Type Filter */}
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => {
+            setFilterType(e.target.value)
+            setPage(1)
+          }}
           className="px-4 py-2.5 rounded-lg border border-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition-all"
         >
           <option value="all">All Types</option>
@@ -206,7 +226,10 @@ export default function CampaignsPage() {
         {/* Status Filter */}
         <select
           value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
+          onChange={(e) => {
+            setFilterStatus(e.target.value)
+            setPage(1)
+          }}
           className="px-4 py-2.5 rounded-lg border border-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent transition-all"
         >
           <option value="all">All Status</option>
@@ -262,8 +285,8 @@ export default function CampaignsPage() {
                     Loading campaigns...
                   </td>
                 </tr>
-              ) : filteredCampaigns.length > 0 ? (
-                filteredCampaigns.map((campaign, index) => (
+              ) : paginatedCampaigns.length > 0 ? (
+                paginatedCampaigns.map((campaign, index) => (
                   <tr key={campaign.id} className="border-b border-border hover:bg-muted/50 transition-colors" style={{ animationDelay: `${index * 50}ms` }}>
                     <td className="py-4 px-6 text-sm font-medium text-foreground">
                       <Link
@@ -297,7 +320,7 @@ export default function CampaignsPage() {
                     </td>
                     <td className="py-4 px-6 text-sm">
                       <div className="flex items-center gap-2">
-                        {campaign.status === 'running' && (
+                        {canManageCampaigns && campaign.status === 'running' && (
                           <button
                             onClick={() => handlePause(campaign.id)}
                             disabled={actioning === campaign.id}
@@ -307,7 +330,7 @@ export default function CampaignsPage() {
                             <Pause size={16} className="text-foreground" />
                           </button>
                         )}
-                        {campaign.status === 'paused' && (
+                        {canManageCampaigns && campaign.status === 'paused' && (
                           <button
                             onClick={() => handleResume(campaign.id)}
                             disabled={actioning === campaign.id}
@@ -317,6 +340,7 @@ export default function CampaignsPage() {
                             <Play size={16} className="text-foreground" />
                           </button>
                         )}
+                        {canManageCampaigns && (
                         <button
                           onClick={() => handleDelete(campaign.id)}
                           disabled={actioning === campaign.id}
@@ -325,6 +349,7 @@ export default function CampaignsPage() {
                         >
                           <Trash2 size={16} className="text-destructive" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -341,18 +366,28 @@ export default function CampaignsPage() {
         </div>
       </div>
 
-      {/* Pagination Info */}
-      {filteredCampaigns.length > 0 && (
+      {/* Pagination */}
+      {campaigns.length > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <p>Showing {filteredCampaigns.length} campaigns</p>
+          <p>
+            Showing {startItem}–{endItem} of {totalFromApi} campaigns
+          </p>
           <div className="flex gap-2">
-            <button className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Previous
             </button>
-            <button className="px-3 py-2 rounded-lg border border-border bg-primary text-primary-foreground">
-              1
-            </button>
-            <button className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors">
+            <span className="px-3 py-2 rounded-lg border border-border bg-muted/50">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Next
             </button>
           </div>

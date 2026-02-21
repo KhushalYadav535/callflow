@@ -2,30 +2,69 @@
 
 import { useGetTenantId, formatTenantName } from '@/lib/tenant'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard,
   PhoneForwarded,
   Settings,
+  Users,
   Menu,
   X,
   ChevronDown,
 } from 'lucide-react'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL
+
 export function Sidebar() {
   const tenantId = useGetTenantId()
   const pathname = usePathname()
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [companies, setCompanies] = useState<{ _id: string; name: string }[]>([])
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [userRole, setUserRole] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('userRole') || 'TENANT_ADMIN' : 'TENANT_ADMIN'
+  )
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen)
+
+  useEffect(() => {
+    if (!API_URL || !tenantId) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    Promise.all([
+      fetch(`${API_URL}/api/auth/companies`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } }),
+    ])
+      .then(async ([companiesRes, meRes]) => {
+        const companiesData = await companiesRes.json().catch(() => ({}))
+        const meData = await meRes.json().catch(() => ({}))
+        setCompanies(companiesData.companies || [])
+        const role = meData.role ?? meData.user?.role ?? localStorage.getItem('userRole')
+        if (role) {
+          setUserRole(role)
+          localStorage.setItem('userRole', role)
+        }
+      })
+      .catch(() => {})
+  }, [tenantId])
+
+  const handleSwitchTenant = (id: string) => {
+    if (id !== tenantId) {
+      setSwitcherOpen(false)
+      router.push(`/app/${id}/dashboard`)
+    }
+  }
 
   if (!tenantId) return null
 
-  const navItems = [
-    { label: 'Dashboard', href: `/app/${tenantId}/dashboard`, icon: LayoutDashboard },
-    { label: 'Campaigns', href: `/app/${tenantId}/campaigns`, icon: PhoneForwarded },
-    { label: 'Settings', href: `/app/${tenantId}/settings`, icon: Settings },
+  const allNavItems = [
+    { label: 'Dashboard', href: `/app/${tenantId}/dashboard`, icon: LayoutDashboard, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER', 'RECOVERY_AGENT'] },
+    { label: 'Campaigns', href: `/app/${tenantId}/campaigns`, icon: PhoneForwarded, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER', 'RECOVERY_AGENT'] },
+    { label: 'Settings', href: `/app/${tenantId}/settings`, icon: Settings, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER'] },
+    { label: 'Team', href: `/app/${tenantId}/team`, icon: Users, roles: ['TENANT_ADMIN'] },
   ]
+  const navItems = allNavItems.filter((item) => item.roles.includes(userRole))
 
   const isActive = (href: string) => pathname === href
 
@@ -61,7 +100,7 @@ export function Sidebar() {
                 <PhoneForwarded size={20} className="text-sidebar-primary-foreground" />
               </div>
               <div className="flex-1 min-w-0">
-                <h1 className="font-bold text-sidebar-foreground truncate">CallFlow</h1>
+                <h1 className="font-bold text-sidebar-foreground truncate">Rembo</h1>
                 <p className="text-xs text-sidebar-accent-foreground opacity-70">AI Calling</p>
               </div>
             </Link>
@@ -90,18 +129,38 @@ export function Sidebar() {
             })}
           </nav>
 
-          {/* Footer */}
-          <div className="p-4 border-t border-sidebar-border">
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent transition-colors">
-              <div className="w-8 h-8 rounded-full bg-sidebar-accent" />
+          {/* Footer - Tenant Switcher */}
+          <div className="p-4 border-t border-sidebar-border relative">
+            <button
+              onClick={() => setSwitcherOpen(!switcherOpen)}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            >
+              <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-semibold">
+                {(companies.find((c) => c._id === tenantId)?.name || tenantId).charAt(0).toUpperCase()}
+              </div>
               <div className="flex-1 text-left min-w-0">
                 <p className="text-xs font-medium text-sidebar-foreground truncate">
-                  {formatTenantName(tenantId)}
+                  {companies.find((c) => c._id === tenantId)?.name || formatTenantName(tenantId)}
                 </p>
-                <p className="text-xs text-sidebar-accent-foreground opacity-70">Admin</p>
+                <p className="text-xs text-sidebar-accent-foreground opacity-70">Current Tenant</p>
               </div>
-              <ChevronDown size={16} />
+              <ChevronDown size={16} className={switcherOpen ? 'rotate-180' : ''} />
             </button>
+            {switcherOpen && companies.length > 0 && (
+              <div className="absolute bottom-full left-4 right-4 mb-2 rounded-lg border border-sidebar-border bg-sidebar overflow-hidden shadow-lg z-50">
+                {companies.map((c) => (
+                  <button
+                    key={c._id}
+                    onClick={() => handleSwitchTenant(c._id)}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-sidebar-accent ${
+                      c._id === tenantId ? 'bg-sidebar-accent font-medium' : ''
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </aside>

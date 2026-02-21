@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { StatCard } from '@/components/dashboard/StatCard'
 import { Phone, TrendingUp, Clock, CheckCircle } from 'lucide-react'
 
 interface CampaignStats {
   totalCampaigns: number
   callsMade: number
-  successRate: number
+  callsConnected: number
+  promiseToPayCount: number
+  paidCount: number
+  connectRate: number
   pending: number
 }
 
@@ -35,7 +39,10 @@ export default function DashboardPage() {
         setStats({
           totalCampaigns: 0,
           callsMade: 0,
-          successRate: 0,
+          callsConnected: 0,
+          promiseToPayCount: 0,
+          paidCount: 0,
+          connectRate: 0,
           pending: 0,
         })
         setLoading(false)
@@ -49,38 +56,37 @@ export default function DashboardPage() {
       }
 
       try {
-        const res = await fetch(`${API_URL}/api/campaigns`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-        if (!res.ok) {
-          setLoading(false)
-          return
-        }
-        const data = await res.json()
-        const campaigns: BackendCampaign[] = data.campaigns || []
-
-        const totalCampaigns = campaigns.length
-        const totalContacts = campaigns.reduce(
-          (sum, c) => sum + (c.totalContacts ?? 0),
-          0,
-        )
+        const [campaignsRes, statsRes] = await Promise.all([
+          fetch(`${API_URL}/api/campaigns?page=1&limit=5`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          fetch(`${API_URL}/api/dashboard/stats`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+        ])
+        const campaignsData = await campaignsRes.json().catch(() => ({}))
+        const statsData = await statsRes.json().catch(() => ({}))
+        const campaigns: BackendCampaign[] = campaignsData.campaigns || []
 
         setStats({
-          totalCampaigns,
-          callsMade: 0,
-          successRate: 0,
-          pending: totalContacts,
+          totalCampaigns: campaigns.length,
+          callsMade: statsData.totalCallsMade ?? 0,
+          callsConnected: statsData.callsConnected ?? 0,
+          promiseToPayCount: statsData.promiseToPayCount ?? 0,
+          paidCount: statsData.paidCount ?? 0,
+          connectRate: statsData.connectRate ?? 0,
+          pending: campaigns.reduce((sum, c) => sum + (c.totalContacts ?? 0), 0),
         })
 
-        setRecentCampaigns(campaigns.slice(0, 5))
+        setRecentCampaigns(campaigns)
       } finally {
         setLoading(false)
       }
     }
 
     load()
+    const interval = setInterval(load, 10000)
+    return () => clearInterval(interval)
   }, [])
 
   return (
@@ -92,33 +98,35 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <StatCard
-          title="Total Campaigns"
-          value={stats?.totalCampaigns ?? 0}
-          icon={<Phone size={24} />}
-          subtitle="Active and completed"
-          loading={loading}
-        />
-        <StatCard
-          title="Calls Made"
+          title="Total Calls Made"
           value={stats?.callsMade ?? 0}
-          icon={<TrendingUp size={24} />}
-          trend={12}
+          icon={<Phone size={24} />}
           loading={loading}
         />
         <StatCard
-          title="Success Rate"
-          value={`${stats?.successRate ?? 0}%`}
+          title="Calls Connected"
+          value={stats?.callsConnected ?? 0}
           icon={<CheckCircle size={24} />}
-          subtitle="Above target"
           loading={loading}
         />
         <StatCard
-          title="Pending Calls"
-          value={stats?.pending ?? 0}
+          title="Promise to Pay"
+          value={stats?.promiseToPayCount ?? 0}
           icon={<Clock size={24} />}
-          subtitle="In queue"
+          loading={loading}
+        />
+        <StatCard
+          title="Paid"
+          value={stats?.paidCount ?? 0}
+          icon={<CheckCircle size={24} />}
+          loading={loading}
+        />
+        <StatCard
+          title="Connect Rate"
+          value={`${stats?.connectRate ?? 0}%`}
+          icon={<TrendingUp size={24} />}
           loading={loading}
         />
       </div>
@@ -127,9 +135,9 @@ export default function DashboardPage() {
       <div className="bg-card rounded-lg border border-border p-6 animate-fade-in" style={{ animationDelay: '300ms' }}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-foreground">Recent Campaigns</h2>
-          <a href="#" className="text-primary hover:text-primary/80 text-sm font-medium">
+          <Link href={`/app/${params.tenantId}/campaigns`} className="text-primary hover:text-primary/80 text-sm font-medium">
             View All →
-          </a>
+          </Link>
         </div>
 
         {recentCampaigns.length === 0 ? (
@@ -165,7 +173,12 @@ export default function DashboardPage() {
                     className="border-b border-border hover:bg-muted/50 transition-colors"
                   >
                     <td className="py-3 px-4 text-sm text-foreground font-medium">
-                      {campaign.name}
+                      <Link
+                        href={`/app/${params.tenantId}/campaigns/${campaign._id}`}
+                        className="hover:text-primary transition-colors"
+                      >
+                        {campaign.name}
+                      </Link>
                     </td>
                     <td className="py-3 px-4 text-sm text-muted-foreground">
                       {campaign.type}

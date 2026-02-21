@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { ArrowRight, Phone, Zap, Users, BarChart3 } from 'lucide-react'
 
 export const metadata: Metadata = {
-  title: 'CallFlow AI - Enterprise AI Calling Platform',
+  title: 'Rembo - Enterprise AI Calling Platform',
   description: 'Professional multi-tenant AI calling platform for enterprises',
 }
 
@@ -40,9 +40,15 @@ export default function LandingPage() {
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
               <Phone size={18} className="text-primary-foreground" />
             </div>
-            <span className="font-bold text-xl text-foreground">CallFlow</span>
+            <span className="font-bold text-xl text-foreground">Rembo</span>
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/pricing" className="px-4 py-2 text-muted-foreground hover:text-foreground transition-colors">
+              Pricing
+            </Link>
+            <Link href="/about" className="px-4 py-2 text-muted-foreground hover:text-foreground transition-colors">
+              About
+            </Link>
             <Link
               href="/auth/login"
               className="px-4 py-2 text-foreground hover:text-primary transition-colors"
@@ -136,7 +142,7 @@ export default function LandingPage() {
             Ready to Transform Your Calling Strategy?
           </h2>
           <p className="text-lg text-muted-foreground mb-8">
-            Join enterprise teams already using CallFlow to scale their communication
+            Join enterprise teams already using Rembo to scale their communication
           </p>
           <Link
             href="/auth/register"
@@ -150,7 +156,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-border/50 py-8 mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between text-sm text-muted-foreground">
-          <p>&copy; 2026 CallFlow AI. All rights reserved.</p>
+          <p>&copy; 2026 Rembo. All rights reserved.</p>
           <div className="flex gap-6">
             <a href="#" className="hover:text-foreground transition-colors">Privacy</a>
             <a href="#" className="hover:text-foreground transition-colors">Terms</a>

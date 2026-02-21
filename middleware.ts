@@ -1,33 +1,43 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { jwtVerify } from 'jose'
 
-// Routes that don't require tenant context
+// Routes that don't require auth
 const PUBLIC_ROUTES = ['/auth/login', '/auth/register', '/auth/forgot-password', '/', '/pricing', '/about']
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Allow public routes through
-  if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
+  if (PUBLIC_ROUTES.some((route) => pathname === route || (route !== '/' && pathname.startsWith(route)))) {
     return NextResponse.next()
   }
 
-  // Check if the route includes a tenantId parameter (e.g., /app/tenant-123/...)
   const tenantMatch = pathname.match(/^\/app\/([a-zA-Z0-9-]+)(?:\/|$)/)
 
-  if (!tenantMatch) {
-    // If trying to access /app/* without tenantId, redirect to login
-    if (pathname.startsWith('/app/')) {
+  if (!tenantMatch && pathname.startsWith('/app/')) {
+    return NextResponse.redirect(new URL('/auth/login', request.url))
+  }
+
+  if (tenantMatch) {
+    const token = request.cookies.get('rembo_token')?.value
+    if (!token) {
       return NextResponse.redirect(new URL('/auth/login', request.url))
     }
-  }
-
-  // Pass tenantId via header for use in components
-  const response = NextResponse.next()
-  if (tenantMatch) {
+    const secret = process.env.JWT_SECRET
+    if (secret) {
+      try {
+        await jwtVerify(token, new TextEncoder().encode(secret))
+      } catch {
+        const res = NextResponse.redirect(new URL('/auth/login', request.url))
+        res.cookies.set('rembo_token', '', { path: '/', maxAge: 0 })
+        return res
+      }
+    }
+    const response = NextResponse.next()
     response.headers.set('x-tenant-id', tenantMatch[1])
+    return response
   }
 
-  return response
+  return NextResponse.next()
 }
 
 export const config = {

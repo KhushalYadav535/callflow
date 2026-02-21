@@ -1,8 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+
 import { ChevronRight, Upload, Phone } from 'lucide-react'
+
+const getUserRole = () =>
+  typeof window !== 'undefined' ? localStorage.getItem('userRole') || 'TENANT_ADMIN' : 'TENANT_ADMIN'
 
 type Step = 'info' | 'upload' | 'review'
 
@@ -21,7 +25,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL
 export default function NewCampaignPage() {
   const params = useParams<{ tenantId: string }>()
   const router = useRouter()
-
+  const userRole = getUserRole()
   const [currentStep, setCurrentStep] = useState<Step>('info')
   const [formData, setFormData] = useState({
     name: '',
@@ -40,6 +44,20 @@ export default function NewCampaignPage() {
   const [campaignId, setCampaignId] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
+
+  useEffect(() => {
+    if (userRole === 'RECOVERY_AGENT' && params?.tenantId) {
+      router.replace(`/app/${params.tenantId}/campaigns`)
+    }
+  }, [userRole, params?.tenantId, router])
+
+  if (userRole === 'RECOVERY_AGENT') {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh]">
+        <p className="text-muted-foreground">You don&apos;t have access to create campaigns. Redirecting...</p>
+      </div>
+    )
+  }
 
   const steps: { id: Step; label: string; icon: React.ReactNode }[] = [
     { id: 'info', label: 'Campaign Info', icon: <Phone size={20} /> },
@@ -270,6 +288,24 @@ export default function NewCampaignPage() {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Maximum call attempts per customer
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={formData.maxRetries}
+                onChange={(e) => {
+                  const v = Math.min(10, Math.max(1, parseInt(e.target.value, 10) || 1))
+                  setFormData({ ...formData, maxRetries: v })
+                }}
+                className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Range: 1–10. Contact stops receiving calls after this many non-answered attempts.</p>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-foreground mb-2">Description</label>
               <textarea
                 value={formData.description}
@@ -392,7 +428,7 @@ export default function NewCampaignPage() {
                 <p className="text-sm text-muted-foreground mb-2">Configuration</p>
                 <ul className="text-sm text-foreground space-y-1">
                   <li>Call Timing: {formData.timing}</li>
-                  <li>Max Retries: {formData.maxRetries}</li>
+                  <li>Maximum call attempts per customer: {formData.maxRetries}</li>
                   <li>Retry Delay: {formData.retryDelay} hours</li>
                 </ul>
               </div>

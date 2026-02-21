@@ -75,7 +75,10 @@ export default function RegisterPage() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('token', token || '')
         localStorage.setItem('userEmail', company?.email ?? formData.email)
-        localStorage.setItem('tenantId', company?.id ?? company?._id ?? 'default-tenant')
+        localStorage.setItem('userRole', 'TENANT_ADMIN')
+        const tid = company?.id ?? company?._id ?? 'default-tenant'
+        localStorage.setItem('tenantId', String(tid))
+        document.cookie = `rembo_token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax`
       }
 
       const tenantId = company?.id ?? company?._id ?? 'default-tenant'
@@ -96,7 +99,7 @@ export default function RegisterPage() {
           <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
             <Phone size={22} className="text-primary-foreground" />
           </div>
-          <span className="font-bold text-2xl text-foreground">CallFlow</span>
+          <span className="font-bold text-2xl text-foreground">Rembo</span>
         </Link>
 
         <div>
@@ -104,7 +107,7 @@ export default function RegisterPage() {
             Get Started Today
           </h1>
           <p className="text-lg text-muted-foreground">
-            Join hundreds of enterprises using CallFlow to revolutionize their communication strategy.
+            Join hundreds of enterprises using Rembo to revolutionize their communication strategy.
           </p>
         </div>
 
@@ -135,7 +138,7 @@ export default function RegisterPage() {
         <div className="max-w-md mx-auto w-full">
           <div className="mb-8 animate-fade-in">
             <h2 className="text-3xl font-bold text-foreground mb-2">Create Your Account</h2>
-            <p className="text-muted-foreground">Join CallFlow and start your free trial</p>
+            <p className="text-muted-foreground">Join Rembo and start your free trial</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 animate-slide-in-up">

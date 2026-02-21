@@ -45,11 +45,15 @@ export default function LoginPage() {
 
       const token: string | undefined = data.token
       const company = data.company
+      const role = data.user?.role ?? 'TENANT_ADMIN'
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('token', token || '')
         localStorage.setItem('userEmail', company?.email ?? email)
-        localStorage.setItem('tenantId', company?.id ?? company?._id ?? 'default-tenant')
+        localStorage.setItem('userRole', role)
+        const tid = company?.id ?? company?._id ?? 'default-tenant'
+        localStorage.setItem('tenantId', String(tid))
+        document.cookie = `rembo_token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax`
       }
 
       const tenantId = company?.id ?? company?._id ?? 'default-tenant'
@@ -70,7 +74,7 @@ export default function LoginPage() {
           <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
             <Phone size={22} className="text-primary-foreground" />
           </div>
-          <span className="font-bold text-2xl text-foreground">CallFlow</span>
+          <span className="font-bold text-2xl text-foreground">Rembo</span>
         </Link>
 
         <div>

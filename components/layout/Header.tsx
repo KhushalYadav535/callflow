@@ -16,8 +16,11 @@ export function Header() {
   }, [])
 
   const handleLogout = () => {
+    localStorage.removeItem('token')
     localStorage.removeItem('userEmail')
+    localStorage.removeItem('userRole')
     localStorage.removeItem('tenantId')
+    document.cookie = 'rembo_token=; path=/; max-age=0'
     router.push('/auth/login')
   }
 
