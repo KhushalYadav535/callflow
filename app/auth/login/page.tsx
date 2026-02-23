@@ -194,8 +194,13 @@ export default function LoginPage() {
             <p className="text-sm text-foreground">Password: <code className="bg-card px-2 py-1 rounded text-primary">password</code></p>
           </div>
 
-          {/* Sign Up Link */}
+          {/* Admin & Sign Up */}
           <p className="text-center text-muted-foreground mt-8">
+            Platform Admin?{' '}
+            <Link href="/admin/login" className="text-amber-500 hover:text-amber-600 font-semibold transition-colors">
+              Admin Login
+            </Link>
+            {' · '}
             Don't have an account?{' '}
             <Link href="/auth/register" className="text-primary hover:text-primary/80 font-semibold transition-colors">
               Sign up

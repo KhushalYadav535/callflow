@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { StatCard } from '@/components/dashboard/StatCard'
-import { Phone, TrendingUp, Clock, CheckCircle } from 'lucide-react'
+import { Phone, TrendingUp, Clock, CheckCircle, Database } from 'lucide-react'
 
 interface CampaignStats {
   totalCampaigns: number
@@ -14,6 +14,7 @@ interface CampaignStats {
   paidCount: number
   connectRate: number
   pending: number
+  accountCount?: number
 }
 
 type BackendCampaign = {
@@ -76,6 +77,7 @@ export default function DashboardPage() {
           paidCount: statsData.paidCount ?? 0,
           connectRate: statsData.connectRate ?? 0,
           pending: campaigns.reduce((sum, c) => sum + (c.totalContacts ?? 0), 0),
+          accountCount: statsData.accountCount ?? 0,
         })
 
         setRecentCampaigns(campaigns)
@@ -98,7 +100,13 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+        <StatCard
+          title="Accounts"
+          value={stats?.accountCount ?? 0}
+          icon={<Database size={24} />}
+          loading={loading}
+        />
         <StatCard
           title="Total Calls Made"
           value={stats?.callsMade ?? 0}
@@ -129,6 +137,22 @@ export default function DashboardPage() {
           icon={<TrendingUp size={24} />}
           loading={loading}
         />
+      </div>
+
+      {/* Quick Links */}
+      <div className="flex gap-4">
+        <Link
+          href={`/app/${params.tenantId}/accounts`}
+          className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+        >
+          View Accounts
+        </Link>
+        <Link
+          href={`/app/${params.tenantId}/analytics`}
+          className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+        >
+          Analytics
+        </Link>
       </div>
 
       {/* Recent Campaigns Table */}

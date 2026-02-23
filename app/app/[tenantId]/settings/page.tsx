@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Phone, Copy, Check, Upload, Shield, Ban } from 'lucide-react'
+import { Phone, Copy, Check, Upload, Shield, Ban, Zap, Database, RefreshCw, Key } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 
@@ -48,13 +48,37 @@ export default function SettingsPage() {
   const [optOutKeywords, setOptOutKeywords] = useState<string[]>([])
   const [optOutInput, setOptOutInput] = useState('')
   const [dndCount, setDndCount] = useState(0)
-  const [activeTab, setActiveTab] = useState<'integration' | 'compliance' | 'dnd'>('integration')
+  const [activeTab, setActiveTab] = useState<'integration' | 'compliance' | 'dnd' | 'offerings' | 'dataSync'>('integration')
+  const [offerings, setOfferings] = useState<{ offeringId: string; name: string; description?: string; isProvisioned: boolean; isActive: boolean }[]>([])
+  const [offeringsLoading, setOfferingsLoading] = useState(false)
+  const [toggleModal, setToggleModal] = useState<{ offeringId: string; name: string; isActive: boolean } | null>(null)
+  const [deactivationReason, setDeactivationReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  const [datasourceMode, setDatasourceMode] = useState<'pull' | 'push' | 'file'>('file')
+  const [pullUrl, setPullUrl] = useState('')
+  const [pullAuthType, setPullAuthType] = useState<'api_key' | 'basic' | 'oauth2'>('api_key')
+  const [pullApiKey, setPullApiKey] = useState('')
+  const [pullHeaderName, setPullHeaderName] = useState('X-API-Key')
+  const [pullUsername, setPullUsername] = useState('')
+  const [pullPassword, setPullPassword] = useState('')
+  const [pullScheduleCron, setPullScheduleCron] = useState('')
+  const [stalenessThresholdHours, setStalenessThresholdHours] = useState(26)
+  const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({})
+  const [fieldMappingBank, setFieldMappingBank] = useState('')
+  const [fieldMappingCanonical, setFieldMappingCanonical] = useState('')
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
+  const [lastSyncStatus, setLastSyncStatus] = useState<'success' | 'failed' | 'partial' | null>(null)
+  const [staleAccountCount, setStaleAccountCount] = useState(0)
+  const [pushHmacSecretSet, setPushHmacSecretSet] = useState(false)
+  const [pushHmacSecret, setPushHmacSecret] = useState('')
+  const [datasourceLoading, setDatasourceLoading] = useState(false)
+  const [syncTriggering, setSyncTriggering] = useState(false)
 
   const webhookUrl = API_URL && tenantId
     ? `${API_URL.replace(/\/$/, '')}/api/webhooks/tenant/${tenantId}/phone`
@@ -133,6 +157,160 @@ export default function SettingsPage() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'offerings') loadOfferings()
+  }, [activeTab])
+
+  const loadDatasource = async () => {
+    if (!API_URL || !tenantId) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setDatasourceLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/api/settings/datasource`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data) {
+        setDatasourceMode(data.mode ?? 'file')
+        setPullUrl(data.pullUrl ?? '')
+        setPullAuthType(data.pullAuthType ?? 'api_key')
+        setPullHeaderName(data.pullAuthConfig?._masked ? 'X-API-Key' : (data.pullAuthConfig?.headerName ?? 'X-API-Key'))
+        setPullApiKey(data.pullAuthConfig?._masked ? '' : (data.pullAuthConfig?.apiKey ?? ''))
+        setPullUsername(data.pullAuthConfig?._masked ? '' : (data.pullAuthConfig?.username ?? ''))
+        setPullPassword(data.pullAuthConfig?._masked ? '' : (data.pullAuthConfig?.password ?? ''))
+        setPullScheduleCron(data.pullScheduleCron ?? '')
+        setStalenessThresholdHours(data.stalenessThresholdHours ?? 26)
+        setFieldMapping(typeof data.fieldMapping === 'object' ? data.fieldMapping : {})
+        setLastSyncAt(data.lastSyncAt ?? null)
+        setLastSyncStatus(data.lastSyncStatus ?? null)
+        setStaleAccountCount(data.staleAccountCount ?? 0)
+        setPushHmacSecretSet(data.pushHmacSecretSet ?? false)
+        setPushHmacSecret(data.pushHmacSecret ?? '')
+      }
+    } finally {
+      setDatasourceLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'dataSync') loadDatasource()
+  }, [activeTab])
+
+  const saveDatasource = async () => {
+    if (!API_URL) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      const pullAuthConfig: Record<string, string> = {}
+      if (datasourceMode === 'pull' && pullAuthType === 'api_key' && pullApiKey) {
+        pullAuthConfig.apiKey = pullApiKey
+        pullAuthConfig.headerName = pullHeaderName || 'X-API-Key'
+      } else if (datasourceMode === 'pull' && pullAuthType === 'basic') {
+        pullAuthConfig.username = pullUsername
+        pullAuthConfig.password = pullPassword
+      } else if (datasourceMode === 'pull' && pullAuthType === 'oauth2' && pullApiKey) {
+        pullAuthConfig.accessToken = pullApiKey
+      }
+      const body: Record<string, unknown> = {
+        mode: datasourceMode,
+        pullUrl: datasourceMode === 'pull' ? pullUrl : undefined,
+        pullAuthType: datasourceMode === 'pull' ? pullAuthType : undefined,
+        pullAuthConfig: datasourceMode === 'pull' && Object.keys(pullAuthConfig).length > 0 ? pullAuthConfig : undefined,
+        pullScheduleCron: datasourceMode === 'pull' ? pullScheduleCron || undefined : undefined,
+        fieldMapping: fieldMapping,
+        stalenessThresholdHours: stalenessThresholdHours,
+      }
+      if (pushHmacSecret && datasourceMode === 'push') body.pushHmacSecret = pushHmacSecret
+      const res = await fetch(`${API_URL}/api/settings/datasource`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed to save')
+      setSuccess('Data sync config saved')
+      loadDatasource()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const triggerPullSync = async () => {
+    if (!API_URL || !tenantId) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setSyncTriggering(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`${API_URL}/api/data/sync/pull/${tenantId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Sync failed')
+      setSuccess(`Sync complete: ${data.created ?? 0} created, ${data.updated ?? 0} updated`)
+      loadDatasource()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sync failed')
+      loadDatasource()
+    } finally {
+      setSyncTriggering(false)
+    }
+  }
+
+  const regenerateHmac = async () => {
+    if (!API_URL || !window.confirm('Regenerate HMAC secret? Existing push integrations must be updated.')) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`${API_URL}/api/settings/datasource/regenerate-hmac`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed')
+      setPushHmacSecret(data.pushHmacSecret ?? '')
+      setPushHmacSecretSet(true)
+      setSuccess('New HMAC secret generated. Save it — it won\'t be shown again.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addFieldMapping = () => {
+    const bank = fieldMappingBank.trim()
+    const canonical = fieldMappingCanonical.trim()
+    if (bank && canonical) {
+      setFieldMapping((m) => ({ ...m, [canonical]: bank }))
+      setFieldMappingBank('')
+      setFieldMappingCanonical('')
+    }
+  }
+
+  const removeFieldMapping = (canonical: string) => {
+    setFieldMapping((m) => {
+      const next = { ...m }
+      delete next[canonical]
+      return next
+    })
+  }
+
+  const pushEndpointUrl = API_URL && tenantId
+    ? `${API_URL.replace(/\/$/, '')}/api/data/tenant/${tenantId}/accounts`
+    : ''
 
   const handleCopy = async () => {
     if (!webhookUrl) return
@@ -333,9 +511,99 @@ export default function SettingsPage() {
     }
   }
 
+  const loadOfferings = async () => {
+    if (!API_URL) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setOfferingsLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/api/settings/offerings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok && data.offerings) setOfferings(data.offerings)
+    } finally {
+      setOfferingsLoading(false)
+    }
+  }
+
+  const openToggleModal = (offeringId: string, name: string, isActive: boolean) => {
+    if (!isActive) {
+      setToggleModal({ offeringId, name, isActive })
+      setDeactivationReason('')
+    } else {
+      doToggleOffering(offeringId, true)
+    }
+  }
+
+  const doToggleOffering = async (offeringId: string, isActive: boolean, reason?: string) => {
+    if (!API_URL) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    setToggleModal(null)
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      const body: { isActive: boolean; deactivationReason?: string } = { isActive }
+      if (!isActive && reason) body.deactivationReason = reason
+      const res = await fetch(`${API_URL}/api/settings/offerings/${offeringId}/state`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed')
+      setSuccess('Offering state updated')
+      loadOfferings()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const toggleOffering = async (offeringId: string, isActive: boolean) => {
+    if (isActive) {
+      doToggleOffering(offeringId, true)
+    } else {
+      const o = offerings.find((x) => x.offeringId === offeringId)
+      openToggleModal(offeringId, o?.name ?? offeringId, isActive)
+    }
+  }
+
+  const handleAccountUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !API_URL || !tenantId) return
+    setUploading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const token = localStorage.getItem('token')
+      if (!token) throw new Error('Not logged in')
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`${API_URL}/api/data/tenant/${tenantId}/accounts/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Upload failed')
+      setSuccess(`Imported ${data.total ?? 0} accounts (${data.created ?? 0} new, ${data.updated ?? 0} updated)`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
   const tabs = [
     { id: 'integration' as const, label: 'Integration', icon: Phone },
     { id: 'compliance' as const, label: 'Compliance', icon: Shield },
+    { id: 'offerings' as const, label: 'Offerings', icon: Zap },
+    { id: 'dataSync' as const, label: 'Data Sync', icon: Database },
     { id: 'dnd' as const, label: 'DND List', icon: Ban },
   ]
 
@@ -558,6 +826,353 @@ export default function SettingsPage() {
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'offerings' && (
+        <div className="bg-card rounded-lg border border-border p-6 space-y-6">
+          <p className="text-sm text-muted-foreground">
+            Control which provisioned offerings are currently active. Contact platform admin to enable new offerings.
+          </p>
+          {offeringsLoading ? (
+            <p className="text-muted-foreground">Loading...</p>
+          ) : (
+            <div className="space-y-4">
+              {offerings.filter((o) => o.isProvisioned).map((o) => (
+                <div key={o.offeringId} className="flex items-center justify-between py-3 border-b border-border last:border-0">
+                  <div>
+                    <p className="font-medium">{o.name}</p>
+                    {o.description && <p className="text-sm text-muted-foreground">{o.description}</p>}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-muted-foreground">{o.isActive ? 'Active' : 'Inactive'}</span>
+                    <button
+                      onClick={() => toggleOffering(o.offeringId, !o.isActive)}
+                      disabled={saving}
+                      className={`px-3 py-1 rounded text-sm font-medium ${
+                        o.isActive ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                      }`}
+                    >
+                      {o.isActive ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {offerings.filter((o) => !o.isProvisioned).length > 0 && (
+                <div className="mt-6 pt-6 border-t border-border">
+                  <p className="text-sm font-medium text-muted-foreground mb-2">Not provisioned</p>
+                  {offerings.filter((o) => !o.isProvisioned).map((o) => (
+                    <div key={o.offeringId} className="flex items-center justify-between py-2 opacity-60">
+                      <span>{o.name}</span>
+                      <span className="text-xs text-muted-foreground">Contact platform team to enable</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!offerings.length && <p className="text-muted-foreground">No offerings</p>}
+            </div>
+          )}
+
+          {toggleModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setToggleModal(null)}>
+              <div className="bg-card rounded-lg border border-border p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <h3 className="font-semibold mb-2">Disable {toggleModal.name}?</h3>
+                <p className="text-sm text-muted-foreground mb-3">Please provide a reason for deactivation (optional but recommended).</p>
+                <textarea
+                  placeholder="e.g. Festival season pause, Maintenance, ..."
+                  value={deactivationReason}
+                  onChange={(e) => setDeactivationReason(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg border border-border mb-4"
+                  rows={3}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => toggleModal && doToggleOffering(toggleModal.offeringId, false, deactivationReason)}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground"
+                  >
+                    Confirm Disable
+                  </button>
+                  <button onClick={() => setToggleModal(null)} className="px-4 py-2 rounded-lg border">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'dataSync' && (
+        <div className="bg-card rounded-lg border border-border p-6 space-y-6">
+          {datasourceLoading ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : (
+          <>
+          <p className="text-sm text-muted-foreground">
+            Configure how account data flows from your CBS into CallFlow. Choose Pull (API), Push (webhook), or File upload.
+          </p>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Sync Mode</label>
+            <div className="flex gap-4">
+              {(['pull', 'push', 'file'] as const).map((m) => (
+                <label key={m} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="dsMode"
+                    checked={datasourceMode === m}
+                    onChange={() => setDatasourceMode(m)}
+                  />
+                  <span className="capitalize">{m}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {datasourceMode === 'pull' && (
+            <div className="space-y-4 border-t border-border pt-6">
+              <h3 className="font-medium">Pull Configuration</h3>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">CBS API URL</label>
+                <input
+                  type="url"
+                  value={pullUrl}
+                  onChange={(e) => setPullUrl(e.target.value)}
+                  placeholder="https://cbs.example.com/api/accounts"
+                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Auth Type</label>
+                <select
+                  value={pullAuthType}
+                  onChange={(e) => setPullAuthType(e.target.value as 'api_key' | 'basic' | 'oauth2')}
+                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                >
+                  <option value="api_key">API Key</option>
+                  <option value="basic">Basic Auth</option>
+                  <option value="oauth2">OAuth2 Bearer</option>
+                </select>
+              </div>
+              {pullAuthType === 'api_key' && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Header Name</label>
+                    <input
+                      type="text"
+                      value={pullHeaderName}
+                      onChange={(e) => setPullHeaderName(e.target.value)}
+                      placeholder="X-API-Key"
+                      className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">API Key</label>
+                    <input
+                      type="password"
+                      value={pullApiKey}
+                      onChange={(e) => setPullApiKey(e.target.value)}
+                      placeholder={pullApiKey ? '' : '••••••••'}
+                      className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                    />
+                  </div>
+                </div>
+              )}
+              {pullAuthType === 'basic' && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Username</label>
+                    <input
+                      type="text"
+                      value={pullUsername}
+                      onChange={(e) => setPullUsername(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">Password</label>
+                    <input
+                      type="password"
+                      value={pullPassword}
+                      onChange={(e) => setPullPassword(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                    />
+                  </div>
+                </div>
+              )}
+              {pullAuthType === 'oauth2' && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Bearer Token</label>
+                  <input
+                    type="password"
+                    value={pullApiKey}
+                    onChange={(e) => setPullApiKey(e.target.value)}
+                    placeholder="Token"
+                    className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Schedule (cron)</label>
+                <input
+                  type="text"
+                  value={pullScheduleCron}
+                  onChange={(e) => setPullScheduleCron(e.target.value)}
+                  placeholder="0 */4 * * * (every 4 hours)"
+                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Staleness threshold (hours)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={stalenessThresholdHours}
+                  onChange={(e) => setStalenessThresholdHours(Number(e.target.value) || 26)}
+                  className="w-32 px-4 py-2.5 rounded-lg border border-border bg-background"
+                />
+              </div>
+              <div>
+                <h4 className="text-sm font-medium text-foreground mb-2">Field Mapping (bank field → canonical)</h4>
+                <p className="text-xs text-muted-foreground mb-2">Canonical: externalAccountId, customerName, phone, outstandingAmount, dpd, dueDate, maturityDate, kycExpiryDate, productType</p>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={fieldMappingCanonical}
+                    onChange={(e) => setFieldMappingCanonical(e.target.value)}
+                    placeholder="Canonical field"
+                    className="flex-1 px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                  <input
+                    type="text"
+                    value={fieldMappingBank}
+                    onChange={(e) => setFieldMappingBank(e.target.value)}
+                    placeholder="Bank API field"
+                    className="flex-1 px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                  <button onClick={addFieldMapping} className="px-4 py-2 rounded-lg border border-border hover:bg-muted">Add</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(fieldMapping).map(([canonical, bank]) => (
+                    <span key={canonical} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-muted text-sm">
+                      {canonical} ← {bank}
+                      <button onClick={() => removeFieldMapping(canonical)} className="hover:text-destructive">×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {datasourceMode === 'push' && (
+            <div className="space-y-4 border-t border-border pt-6">
+              <h3 className="font-medium">Push Configuration</h3>
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label className="text-sm font-medium text-foreground">Inbound Push Endpoint URL</label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (pushEndpointUrl) {
+                        await navigator.clipboard.writeText(pushEndpointUrl)
+                        setCopied(true)
+                        setTimeout(() => setCopied(false), 2000)
+                      }
+                    }}
+                    className="p-2 rounded-lg border border-border hover:bg-muted/50"
+                  >
+                    {copied ? <Check size={18} /> : <Copy size={18} />}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  readOnly
+                  value={pushEndpointUrl}
+                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-muted/30 font-mono text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">HMAC Secret</label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={pushHmacSecret}
+                    onChange={(e) => setPushHmacSecret(e.target.value)}
+                    placeholder={pushHmacSecretSet && !pushHmacSecret ? '•••••••• (configured)' : 'Set secret for push auth'}
+                    className="flex-1 px-4 py-2.5 rounded-lg border border-border bg-background"
+                  />
+                  <button
+                    onClick={regenerateHmac}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border hover:bg-muted"
+                  >
+                    <Key size={16} />
+                    Regenerate
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">POST to endpoint with X-HMAC-Signature: sha256=&lt;hex(hmac-sha256(body, secret))&gt;</p>
+              </div>
+            </div>
+          )}
+
+          {datasourceMode === 'file' && (
+            <div className="space-y-4 border-t border-border pt-6">
+              <h3 className="font-medium">File Upload</h3>
+              <p className="text-sm text-muted-foreground">
+                Required columns: Account ID, Customer Name, Phone. Optional: Outstanding, DPD, Due Date, Maturity Date, KYC Expiry, Product Type.
+              </p>
+              <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+                <Upload size={48} className="mx-auto mb-4 text-muted-foreground" />
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleAccountUpload}
+                  disabled={uploading}
+                  className="hidden"
+                  id="account-upload"
+                />
+                <label
+                  htmlFor="account-upload"
+                  className="inline-block px-6 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer disabled:opacity-50"
+                >
+                  {uploading ? 'Uploading...' : 'Upload Account File'}
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="border-t border-border pt-6">
+            <h3 className="font-medium mb-3">Sync Status</h3>
+            <div className="flex flex-wrap gap-4 items-center">
+              <span className="text-sm text-muted-foreground">Last sync: {lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</span>
+              <span className={`px-2 py-0.5 rounded text-sm ${lastSyncStatus === 'success' ? 'bg-green-500/20 text-green-700 dark:text-green-400' : lastSyncStatus === 'failed' ? 'bg-destructive/20 text-destructive' : 'bg-muted text-muted-foreground'}`}>
+                {lastSyncStatus ?? '—'}
+              </span>
+              <span className="text-sm text-muted-foreground">Stale accounts: {staleAccountCount}</span>
+              {datasourceMode === 'pull' && pullUrl && (
+                <button
+                  onClick={triggerPullSync}
+                  disabled={syncTriggering || datasourceLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  <RefreshCw size={16} className={syncTriggering ? 'animate-spin' : ''} />
+                  {syncTriggering ? 'Syncing...' : 'Sync Now'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <button
+            onClick={saveDatasource}
+            disabled={saving || datasourceLoading}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Config'}
+          </button>
+          {datasourceMode === 'file' && <p className="text-xs text-muted-foreground">File mode: upload saves automatically. Save Config updates sync mode and staleness threshold.</p>}
+          </>
+          )}
         </div>
       )}
 

@@ -12,6 +12,9 @@ import {
   Menu,
   X,
   ChevronDown,
+  Database,
+  Bot,
+  BarChart3,
 } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
@@ -60,13 +63,16 @@ export function Sidebar() {
 
   const allNavItems = [
     { label: 'Dashboard', href: `/app/${tenantId}/dashboard`, icon: LayoutDashboard, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER', 'RECOVERY_AGENT'] },
+    { label: 'Accounts', href: `/app/${tenantId}/accounts`, icon: Database, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER', 'RECOVERY_AGENT'] },
+    { label: 'Bots', href: `/app/${tenantId}/bots`, icon: Bot, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER'] },
     { label: 'Campaigns', href: `/app/${tenantId}/campaigns`, icon: PhoneForwarded, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER', 'RECOVERY_AGENT'] },
+    { label: 'Analytics', href: `/app/${tenantId}/analytics`, icon: BarChart3, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER'] },
     { label: 'Settings', href: `/app/${tenantId}/settings`, icon: Settings, roles: ['TENANT_ADMIN', 'CAMPAIGN_MANAGER'] },
     { label: 'Team', href: `/app/${tenantId}/team`, icon: Users, roles: ['TENANT_ADMIN'] },
   ]
   const navItems = allNavItems.filter((item) => item.roles.includes(userRole))
 
-  const isActive = (href: string) => pathname === href
+  const isActive = (href: string) => pathname === href || (href !== `/app/${tenantId}/settings` && pathname.startsWith(href))
 
   return (
     <>
